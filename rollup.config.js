@@ -1,36 +1,16 @@
 import commonjs from '@rollup/plugin-commonjs';
 import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
+import run from '@rollup/plugin-run';
 import typescript from '@rollup/plugin-typescript';
+import clear from 'rollup-plugin-clear';
 import copy from 'rollup-plugin-copy';
 import livereload from 'rollup-plugin-livereload';
 import svelte from 'rollup-plugin-svelte';
 import { terser } from 'rollup-plugin-terser';
 import sveltePreprocess from 'svelte-preprocess';
 
-
 const production = !process.env.ROLLUP_WATCH;
-
-function serve() {
-  let server;
-
-  function toExit() {
-    if (server) server.kill(0);
-  }
-
-  return {
-    writeBundle() {
-      if (server) return;
-      server = require('child_process').spawn('npm', ['run', 'start', '--', '--dev'], {
-        stdio: ['ignore', 'inherit', 'inherit'],
-        shell: true
-      });
-
-      process.on('SIGTERM', toExit);
-      process.on('exit', toExit);
-    }
-  };
-}
 
 export default [{
   // Server
@@ -41,13 +21,13 @@ export default [{
     format: 'cjs',
     sourcemap: true,
   },
-  external: ['buffer', 'crypto', 'events', 'fs', 'http', 'net', 'path', 'querystring', 'stream', 'tty', 'url', 'util', 'zlib'],
   onwarn(warning, warn) {
-    // suppress eval warnings on the server.
-    if (warning.code === 'EVAL') return;
+    // suppress eval and 'imported a node builtin module' warnings on the server.
+    if (warning.code === 'EVAL' || warning.code === 'UNRESOLVED_IMPORT') return;
     warn(warning);
   },
   plugins: [
+    clear({ targets: ['dist'] }),
     resolve({
       browser: false,
       preferBuiltins: true,
@@ -56,6 +36,14 @@ export default [{
     json(),
     typescript({
       tsconfig: 'tsconfig.server.json',
+    }),
+
+    // Run the server when using `npm run dev`.
+    !production && run({
+      execArgv: [
+        '--require', 'source-map-support/register',
+        '--require', 'dotenv/config'
+      ],
     }),
   ],
 }, {
@@ -79,16 +67,13 @@ export default [{
       preprocess: sveltePreprocess(),
     }),
 
-    // If you have external dependencies installed from
-    // npm, you'll most likely need these plugins. In
-    // some cases you'll need additional configuration -
-    // consult the documentation for details:
-    // https://github.com/rollup/plugins/tree/master/packages/commonjs
+    // To handle external dependencies installed from npm:
     resolve({
       browser: true,
       dedupe: ['svelte']
     }),
     commonjs(),
+
     typescript({
       tsconfig: 'tsconfig.client.json',
       sourceMap: !production,
@@ -100,13 +85,9 @@ export default [{
       ]
     }),
 
-    // In dev mode, call `npm run start` once
-    // the bundle has been generated
-    !production && serve(),
-
     // Watch the `public` directory and refresh the
     // browser on changes when not in production
-    !production && livereload('public'),
+    !production && livereload('dist'),
 
     // If we're building for production (npm run build
     // instead of npm run dev), minify
