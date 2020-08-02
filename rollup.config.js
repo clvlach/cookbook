@@ -1,9 +1,6 @@
 import commonjs from '@rollup/plugin-commonjs';
-import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
-import run from '@rollup/plugin-run';
 import typescript from '@rollup/plugin-typescript';
-import clear from 'rollup-plugin-clear';
 import copy from 'rollup-plugin-copy';
 import livereload from 'rollup-plugin-livereload';
 import svelte from 'rollup-plugin-svelte';
@@ -12,42 +9,7 @@ import sveltePreprocess from 'svelte-preprocess';
 
 const production = !process.env.ROLLUP_WATCH;
 
-export default [{
-  // Server
-  input: 'src/app.ts',
-  output: {
-    name: 'app',
-    dir: 'dist/',
-    format: 'cjs',
-    sourcemap: true,
-  },
-  onwarn(warning, warn) {
-    // suppress eval and 'imported a node builtin module' warnings on the server.
-    if (warning.code === 'EVAL' || warning.code === 'UNRESOLVED_IMPORT') return;
-    warn(warning);
-  },
-  plugins: [
-    clear({ targets: ['dist'] }),
-    resolve({
-      browser: false,
-      preferBuiltins: true,
-    }),
-    commonjs(),
-    json(),
-    typescript({
-      tsconfig: 'tsconfig.server.json',
-    }),
-
-    // Run the server when using `npm run dev`.
-    !production && run({
-      execArgv: [
-        '--require', 'source-map-support/register',
-        '--require', 'dotenv/config'
-      ],
-    }),
-  ],
-}, {
-  // Client
+export default {
   input: 'src/client/main.ts',
   output: {
     dir: 'dist/public/build',
@@ -75,7 +37,7 @@ export default [{
     commonjs(),
 
     typescript({
-      tsconfig: 'tsconfig.client.json',
+      tsconfig: 'src/client/tsconfig.json',
       sourceMap: !production,
     }),
 
@@ -96,4 +58,4 @@ export default [{
   watch: {
     clearScreen: false
   }
-}];
+};

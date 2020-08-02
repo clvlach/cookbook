@@ -1,10 +1,10 @@
 {
   "extends": "@tsconfig/svelte/tsconfig.json",
 
-  "include": ["src/client/**/*"],
+  "include": ["**/*"],
   "compilerOptions": {
     "target": "es2019",
-    "outDir": "dist/public/build",
+    "outDir": "../../dist/public/build",
     "strict": true,
     "sourceMap": true
   }
