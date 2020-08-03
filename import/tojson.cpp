@@ -1,8 +1,9 @@
 #include "cb_database.h"
 
-#include "json/json.h"
 #include "time.h"
 #include "unicode/unistr.h"
+#include "json/json.h"
+#include <iomanip>
 #include <random>
 #include <regex>
 
@@ -12,15 +13,16 @@ static const char hexDigits[] = "0123456789ABCDEF";
 
 // NOT THREAD SAFE
 std::string next_push_id() {
-  static const char alphabet[] = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
+  static const char alphabet[] =
+      "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
   static int64_t last_timestamp = 0;
   static unsigned char last_rand[12] = {};
   static std::random_device engine;
   static std::uniform_int_distribution<char> dist(0, 63);
   timespec time;
   assert(0 == clock_gettime(CLOCK_REALTIME, &time));
-  int64_t current_timestamp = static_cast<int64_t>(time.tv_sec) * 1000
-    + time.tv_nsec / 1000 / 1000;
+  int64_t current_timestamp =
+      static_cast<int64_t>(time.tv_sec) * 1000 + time.tv_nsec / 1000 / 1000;
   bool duplicate_timestamp = false;
   if (current_timestamp == last_timestamp) {
     duplicate_timestamp = true;
@@ -53,12 +55,14 @@ std::string next_push_id() {
 }
 
 void maybe_set(Value& val, const char* key, const CB_String& s) {
-  if (s.size() == 0) return;
+  if (s.size() == 0)
+    return;
   val[key] = s.str();
 }
 void maybe_append(Value& val, const CB_String& s) {
-  if (s.size() == 0) return;
-  val[next_push_id()] = s.str();
+  if (s.size() == 0)
+    return;
+  val.append(s.str());
 }
 
 std::string lowerCase(const std::string& source) {
@@ -86,7 +90,7 @@ std::string urlFromTitle(const std::string& title) {
 std::string escapeKey(const std::string& unescaped) {
   std::string result;
   for (unsigned char c : unescaped) {
-    switch(c) {
+    switch (c) {
     default:
       result += c;
       break;
@@ -99,42 +103,44 @@ std::string escapeKey(const std::string& unescaped) {
     case ']':
     case '%':  // And the escape character.
       result += '%';
-      result += hexDigits[c/16];
-      result += hexDigits[c%16];
+      result += hexDigits[c / 16];
+      result += hexDigits[c % 16];
       break;
     }
   }
   return result;
 }
 
+Value typedObject(const char* type) {
+  Value result(Json::objectValue);
+  result["@type"] = type;
+  return result;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::cout << "Pass the name of the recipe database to this program, usually 'Recipe.cbd'.\n";
+    std::cout << "Pass the name of the recipe database to this program, "
+                 "usually 'Recipe.cbd'.\n";
     exit(0);
   }
 
+  const Value emptyArray(Json::arrayValue);
   const Value emptyObject(Json::objectValue);
 
   // Counts the number of times a url has been used.
   std::map<std::string, int> urlCounts;
   std::ostringstream titleStream;
+  std::ostringstream dateStream;
 
   CB_Book* book = new CB_Book;
   book->Read(argv[1]);
-  Value root(Json::objectValue);
+  Value json_recipes(Json::arrayValue);
   const CB_RecipeMap_t& recipes = book->Get_sortedByName();
-  Value& recipesMeta = root["recipesMeta"] = emptyObject;
-  Value& recipesDetails = root["recipesDetails"] = emptyObject;
-  Value& recipeUrls = root["recipeUrls"] = emptyObject;
-  Value& ingredientNames = root["ingredientNames"] = emptyObject;
-  Value& ingredientRecipes = root["ingredientRecipes"] = emptyObject;
-  int i = 0;
   for (auto& elem : recipes) {
-    //if (i++ > 10) break;
     CB_Recipe* const recipe = elem.second;
-    const std::string recipeId = next_push_id();
-    Value& recipeMeta = recipesMeta[recipeId] = emptyObject;
-    Value& recipeDetails = recipesDetails[recipeId] = emptyObject;
+    Value& recipeJson = json_recipes.append(emptyObject);
+    recipeJson["@context"] = "http://schema.org";
+    recipeJson["@type"] = "Recipe";
     std::string title = recipe->Get_name().str();
     std::string recipeUrl = urlFromTitle(title);
     if (++urlCounts[recipeUrl] > 1) {
@@ -144,58 +150,53 @@ int main(int argc, char** argv) {
       recipeUrl = urlFromTitle(title);
     }
     title = titleCase(title);
-    recipeMeta["title"] = title;
-    if (recipeUrl.size() > 1) {
-      recipeUrls[recipeUrl]["id"] = recipeId;
-    }
+    recipeJson["name"] = title;
+    recipeJson["slug"] = recipeUrl;
 
     int serves = atoi(recipe->Get_serves().c_str());
     if (serves > 0)
-      recipeDetails["serves"] = serves;
-    tm date = {};
-    if (3 == sscanf(recipe->Get_date().c_str(), "%d-%d-%d",
-                    &date.tm_mon, &date.tm_mday, &date.tm_year)) {
-      date.tm_mon--;  // 0-based.
-      date.tm_year -= 1900;  // I <3 y2k.
-      date.tm_isdst = -1;  // Unknown.
-      Value::Int64 date_seconds = mktime(&date);  // Interprets date as local time.
-      if (date_seconds > 0) {
-        recipeDetails["date"] = date_seconds * 1000;
-      }
+      recipeJson["recipeYield"] =
+          recipe->Get_serves().str() + " serving" + (serves == 1 ? "" : "s");
+    int month, day, year;
+    if (3 ==
+        sscanf(recipe->Get_date().c_str(), "%d-%d-%d", &month, &day, &year)) {
+      dateStream.str("");
+      dateStream << std::setfill('0') << std::setw(4) << year << "-"
+                 << std::setw(2) << month << "-" << day;
+      recipeJson["dateCreated"] = dateStream.str();
     }
 
-    Value categories = emptyObject;
+    Value categories = emptyArray;
     maybe_append(categories, recipe->Get_cat1());
     maybe_append(categories, recipe->Get_cat2());
     maybe_append(categories, recipe->Get_cat3());
     maybe_append(categories, recipe->Get_cat4());
-    recipeDetails["categories"] = std::move(categories);
+    recipeJson["recipeCategory"] = std::move(categories);
 
-    const std::vector< CB_Ingredient* >& ingredients = recipe->Get_ingredients();
-    Value& json_ingredients = recipeDetails["ingredients"] = emptyObject;
+    const std::vector<CB_Ingredient*>& ingredients = recipe->Get_ingredients();
+    Value& json_ingredients = recipeJson["recipeIngredient"] = emptyArray;
     for (CB_Ingredient* ingredient : ingredients) {
-      Value& json_ingredient = json_ingredients[next_push_id()] = emptyObject;
-      maybe_set(json_ingredient, "quantity", ingredient->Get_quantity());
-      maybe_set(json_ingredient, "unit", ingredient->Get_measurement());
+      Value& json_ingredient =
+          json_ingredients.append(typedObject("HowToSupply"));
       maybe_set(json_ingredient, "name", ingredient->Get_ingredient());
-      maybe_set(json_ingredient, "preparation", ingredient->Get_preparation());
-
-      if (ingredient->Get_ingredient().size() > 0) {
-        Value& ingredientId = ingredientNames[escapeKey(ingredient->Get_ingredient().str())];
-        if (!ingredientId) {
-          ingredientId = next_push_id();
-        }
-        ingredientRecipes[ingredientId.asCString()][recipeId] = title;
+      if (ingredient->Get_quantity().size() > 0) {
+        Value& quantitativeValue = json_ingredient["requiredQuantity"] =
+            typedObject("QuantitativeValue");
+        quantitativeValue["value"] = ingredient->Get_quantity().str();
+        maybe_set(quantitativeValue, "unitText", ingredient->Get_measurement());
+      } else if (ingredient->Get_measurement().size() > 0) {
+        // Things like "a pinch".
+        json_ingredient["requiredQuantity"] =
+            ingredient->Get_measurement().str();
       }
+      maybe_set(json_ingredient, "description", ingredient->Get_preparation());
     }
 
-    const std::vector< CB_String >& direction_lines = recipe->Get_directions();
-    std::string directions;
+    const std::vector<CB_String>& direction_lines = recipe->Get_directions();
+    Value& instructions = recipeJson["recipeInstructions"] = emptyArray;
     for (const auto& direction : direction_lines) {
-      directions += direction.str();
-      directions += "\n";
+      instructions.append(direction.str());
     }
-    recipeDetails["directions"] = directions;
   }
-  Json::StyledStreamWriter("  ").write(std::cout, root);
-};
+  Json::StyledStreamWriter("  ").write(std::cout, json_recipes);
+}
